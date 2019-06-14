@@ -1,0 +1,93 @@
+import zipfile
+from zipfile import ZipFile
+import PIL
+from PIL import Image
+from PIL import ImageDraw
+import pytesseract
+import cv2 as cv
+import numpy as np
+import ioimport math
+# loading the face detection classifier
+face_cascade = cv.CascadeClassifier('readonly/haarcascade_frontalface_default.xml')
+
+# Loading the images from the Zip File, both in PIL and cv-format
+globalImages = {}
+with ZipFile('readonly/images.zip') as myzip:    
+	for zipinfo in myzip.infolist():        
+		filename = zipinfo.filename        
+		globalImages[filename] = {}        
+		data = myzip.read(filename)        
+		pilImage = PIL.Image.open(io.BytesIO(data))        
+		globalImages[filename]['PILImage'] = pilImage        
+		cvImage = np.array(pilImage.convert("L"))         
+		globalImages[filename]['CVImage'] = cvImage
+		
+def getFaces(pilImage, cvImage):    
+	''' Function to get a list of face images based on an image    
+	:param pilImage: PIL image    
+	:param cvImage: cv image for face detection    
+	:return: list of face images    
+	'''    
+	faces = face_cascade.detectMultiScale(cvImage, 1.3)    
+	faceImages = []    
+	for x,y,w,h in faces:        
+		cropRectangle = (x,y,x+w,y+h)        
+		croppedImage = pilImage.crop(cropRectangle)        
+		faceImages.append(croppedImage)    
+	return faceImages
+
+faceSize = 100
+imagesPerRow = 5
+
+def CreateContactSheet(imageName):    
+	''' Create contact sheet image composed of face images    
+	:param imageName: name of the image to create contact sheet for. The globalImages dictionary is expected to have data for imageName    
+	:returns: contactsheet image    
+	'''    
+	pilImage = globalImages[imageName]['PILImage']    
+	cvImage = globalImages[imageName]['CVImage']    
+	faceImages = getFaces(pilImage, cvImage)    
+	for faceImage in faceImages:        
+		faceImage.thumbnail((faceSize,faceSize), Image.NEAREST)
+    
+	if len(faceImages) == 0:        
+		return None    
+	
+	numberOfRows = math.ceil(len(faceImages)/imagesPerRow)
+    
+	contactSheet = Image.new('RGB', (faceSize*imagesPerRow, faceSize*numberOfRows), (0, 0, 0, 0))
+    currentX = 0    
+	currentY = 0    
+	imageCounter = 0
+    for faceImage in faceImages:        
+		if (imageCounter > 0) & (imageCounter % imagesPerRow == 0):            
+			currentX = 0            
+			currentY = currentY + faceSize        
+		contactSheet.paste(faceImage, (currentX, currentY))        
+		currentX = currentX + faceSize        
+		imageCounter = imageCounter + 1    
+	return contactSheet.copy()
+
+# Loop through images to create a contact sheet for each image
+for imageName in globalImages.keys():    
+	contactSheet = CreateContactSheet(imageName)    
+	globalImages[imageName]['ContactSheet'] = contactSheet
+
+# Loop through images to extract text (through pytesseract)
+for imageName in globalImages.keys():    
+	pilImage = globalImages[imageName]['PILImage']    
+	text = pytesseract.image_to_string(pilImage)    
+	globalImages[imageName]['Text'] = text.lower()
+	
+####################### Run your own queries starts from here ##########################
+searchString = "Mark"
+searchString = searchString.lower()
+for imageName in globalImages.keys():    
+	text = globalImages[imageName]['Text']    
+	if searchString in text:        
+		print("Results found in " + imageName)        
+		contactSheet = globalImages[imageName]['ContactSheet']        
+		if contactSheet == None:            
+			print("But there were no faces in that file!")        
+		else:            
+			display(contactSheet)
